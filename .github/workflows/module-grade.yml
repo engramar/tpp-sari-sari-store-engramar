@@ -1,0 +1,80 @@
+name: Module Grade
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run module tests
+        id: tests
+        continue-on-error: true
+        run: pytest --maxfail=1 --disable-warnings --json-report --json-report-file=grade_report.json
+
+      - name: Generate receipt mentor hint
+        if: github.event_name == 'pull_request' && env.OPENAI_API_KEY != '' && steps.tests.outcome == 'failure'
+        env:
+          AI_RECEIPT_HINTS: 1
+        run: python scripts/ai_receipt_hint.py grade_report.json --output ai_hint.txt
+
+      - name: Verify concept reflections
+        if: github.event_name == 'pull_request' && github.repository_owner != 'thepusoproject'
+        env:
+          AI_CONCEPT_TRIAGE: 1
+        run: python scripts/check_concepts.py --ai-report ai_concepts.md
+
+      - name: Compute grade artifacts
+        run: python scripts/compute_grade.py grade_report.json --json-output grades/latest.json --markdown-output GRADEBOOK.md
+
+      - name: Generate adaptive badge summary
+        if: github.event_name == 'pull_request'
+        env:
+          AI_BADGES: 1
+        run: python scripts/ai_badges.py
+
+      - name: Upload grading artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: module-grade
+          path: |
+            grade_report.json
+            grades/latest.json
+            GRADEBOOK.md
+            ai_concepts.md
+            ai_hint.txt
+            badges/latest.json
+          if-no-files-found: ignore
+
+      - name: Commit gradebook on main
+        if: github.event_name == 'push'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: update gradebook'
+          file_pattern: 'GRADEBOOK.md grades/latest.json'
+
+      - name: Fail if tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1

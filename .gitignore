@@ -1,0 +1,7 @@
+roster-worker/.wrangler/
+
+__pycache__/
+.pytest_cache/
+badges/latest.json
+ai_concepts.md
+ai_hint.txt
